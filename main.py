@@ -4,17 +4,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-# --- 1. ACO ALGORITHM (CORE LOGIC) ---
-def aco_knapsack(items, weights, values, capacity, n_ants=10, n_iterations=50, alpha=1.0, beta=2.0, evaporation=0.5):
+# ==========================================
+# PART 1: ACO ALGORITHM LOGIC
+# ==========================================
+def aco_knapsack(items, weights, values, capacity, n_ants=20, n_iterations=100, alpha=1.0, beta=2.0, evaporation=0.5):
     """
-    Executes the Ant Colony Optimization algorithm for the Knapsack Problem.
+    Core function to run Ant Colony Optimization for Knapsack Problem.
     """
     n_items = len(items)
-    # Initialize pheromones with a small positive value
+    # Initialize pheromone levels (small amount on all paths)
     pheromone = np.full(n_items, 0.1) 
-    best_value = 0
-    best_combination = None
-    history = []
+    
+    best_global_value = 0
+    best_global_combination = None
+    history = [] # To store best value per iteration for the graph
 
     for iteration in range(n_iterations):
         all_ant_values = []
@@ -22,176 +25,173 @@ def aco_knapsack(items, weights, values, capacity, n_ants=10, n_iterations=50, a
         for ant in range(n_ants):
             current_weight = 0
             current_value = 0
-            selected_items = np.zeros(n_items)
+            selected_items = np.zeros(n_items) # 0 = not selected, 1 = selected
             available_indices = list(range(n_items))
             
-            # Ant builds a solution
+            # --- Ant constructs a solution ---
             while available_indices:
                 probs = []
                 valid_indices = []
                 
                 for i in available_indices:
-                    # Check if item fits in the knapsack
+                    # Check if item fits in the bag
                     if current_weight + weights[i] <= capacity:
-                        # Heuristic: Value to Weight Ratio (Greedy factor)
+                        # Heuristic information (Greedy factor: Value / Weight)
                         heuristic = values[i] / weights[i] if weights[i] > 0 else values[i]
                         
-                        # ACO Formula: Probability = (Pheromone^alpha) * (Heuristic^beta)
+                        # Calculate probability using ACO formula
                         p = (pheromone[i] ** alpha) * (heuristic ** beta)
                         probs.append(p)
                         valid_indices.append(i)
                 
-                # If no items fit or no valid probabilities, stop
+                # If no items fit, stop
                 if not probs or sum(probs) == 0:
                     break
                 
-                # Normalize probabilities (Roulette Wheel Selection)
+                # Normalize probabilities (Roulette Wheel)
                 probs = np.array(probs) / sum(probs)
+                
+                # Ant makes a choice
                 next_item = np.random.choice(valid_indices, p=probs)
                 
-                # Update current ant's state
+                # Update ant's bag
                 selected_items[next_item] = 1
                 current_weight += weights[next_item]
                 current_value += values[next_item]
                 available_indices.remove(next_item)
 
-            # Check if this ant found a new global best
-            if current_value > best_value:
-                best_value = current_value
-                best_combination = selected_items.copy()
+            # --- Check if this ant found a new best solution ---
+            if current_value > best_global_value:
+                best_global_value = current_value
+                best_global_combination = selected_items.copy()
             
             all_ant_values.append(current_value)
 
-        # --- PHEROMONE UPDATE PHASE ---
-        # 1. Evaporation: Decrease pheromone on all paths
+        # --- Pheromone Update (Global Update) ---
+        # 1. Evaporation (Trail fades over time)
         pheromone *= (1 - evaporation)
         
-        # 2. Deposit: Strengthen pheromone on the best path found so far
-        if best_combination is not None:
+        # 2. Deposit (Reinforce the best path)
+        if best_global_combination is not None:
             for i in range(n_items):
-                if best_combination[i] == 1:
-                    # Amount deposited is proportional to solution quality
-                    pheromone[i] += (best_value / 100) 
+                if best_global_combination[i] == 1:
+                    # Logic: Better value = Stronger pheromone deposit
+                    pheromone[i] += (best_global_value / 100) 
 
-        # Record history for the graph
-        history.append(best_value)
+        # Save history for the graph
+        history.append(best_global_value)
     
-    return best_value, best_combination, history
+    return best_global_value, best_global_combination, history
 
-# --- 2. STREAMLIT USER INTERFACE (UI) ---
-st.set_page_config(page_title="ACO Knapsack Lab", layout="wide")
+# ==========================================
+# PART 2: STREAMLIT USER INTERFACE (UI)
+# ==========================================
+st.set_page_config(page_title="ACO Knapsack Project", layout="wide")
 
-st.title("🐜 ACO Knapsack Solver & Evaluator")
+st.title("🐜 Ant Colony Optimization (ACO) for Knapsack Problem")
 st.markdown("""
-This system uses **Ant Colony Optimization (ACO)** to solve the Knapsack Problem. 
-It simulates digital ants foraging for the most optimal combination of items to maximize value within a weight limit.
+**Project Evaluation:** This system uses artificial ants to find the optimal combination of items 
+to maximize value without exceeding the weight capacity.
 """)
 
-# --- SIDEBAR CONFIGURATION ---
-st.sidebar.header("⚙️ Algorithm Configuration")
+# --- SIDEBAR: SETTINGS ---
+st.sidebar.header("1. Algorithm Settings")
+capacity = st.sidebar.number_input("Knapsack Capacity (Max Weight)", min_value=1, value=3000)
+n_ants = st.sidebar.slider("Number of Ants", 5, 100, 20)
+n_iterations = st.sidebar.slider("Number of Iterations", 10, 500, 50)
+evaporation = st.sidebar.slider("Evaporation Rate", 0.1, 0.9, 0.5, help="Higher value = Pheromone vanishes faster.")
 
-# Input parameters
-capacity = st.sidebar.number_input("Knapsack Capacity (Max Weight)", min_value=1, value=50)
-n_ants = st.sidebar.slider("Number of Ants", 5, 100, 20, help="More ants increase exploration but slow down processing.")
-n_iterations = st.sidebar.slider("Number of Iterations", 10, 500, 100, help="How many times the colony repeats the search.")
-evaporation = st.sidebar.slider("Pheromone Evaporation Rate", 0.1, 0.9, 0.5, help="High evaporation makes ants forget old paths faster.")
+st.sidebar.markdown("---")
+st.sidebar.header("2. Upload Data")
+uploaded_file = st.sidebar.file_uploader("Upload CSV File", type="csv")
 
-# Advanced Parameters (Optional)
-with st.sidebar.expander("Advanced Parameters (Alpha/Beta)"):
-    alpha = st.slider("Alpha (Pheromone Importance)", 0.0, 5.0, 1.0)
-    beta = st.slider("Beta (Heuristic Importance)", 0.0, 5.0, 2.0)
-
-# File Uploader
-st.sidebar.header("📁 Input Data")
-uploaded_file = st.sidebar.file_uploader("Upload CSV Dataset", type="csv")
-
-# --- MAIN EXECUTION ---
+# --- MAIN SECTION ---
 if uploaded_file:
-    # Read CSV
+    # Read the file
     df = pd.read_csv(uploaded_file)
-    # Clean column names (remove spaces, lowercase) to prevent KeyErrors
+    
+    # Clean column names (remove spaces, convert to lowercase)
     df.columns = df.columns.str.strip().str.lower()
     
-    st.subheader("📋 Data Preview")
+    st.write("### Data Preview")
     st.dataframe(df.head())
 
-    # Dynamic Column Mapping
-    st.markdown("### Column Mapping")
+    # --- DYNAMIC COLUMN MAPPING ---
+    # This prevents errors if your CSV headers are named differently
+    st.warning("⚠️ Please confirm the columns below match your CSV data:")
     cols = df.columns.tolist()
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        item_col = st.selectbox("Select 'Item' Column:", cols, index=0)
+        item_col = st.selectbox("Select Item Name Column", cols, index=0)
     with c2:
-        val_col = st.selectbox("Select 'Value' Column:", cols, index=1 if len(cols)>1 else 0)
+        val_col = st.selectbox("Select Value/Price Column", cols, index=1 if len(cols)>1 else 0)
     with c3:
-        weight_col = st.selectbox("Select 'Weight' Column:", cols, index=2 if len(cols)>2 else 0)
+        weight_col = st.selectbox("Select Weight Column", cols, index=2 if len(cols)>2 else 0)
 
-    # Run Button
-    if st.button("🚀 Run ACO Evaluation"):
-        with st.spinner('Ants are foraging for solutions...'):
+    # --- RUN BUTTON ---
+    if st.button("🚀 Run ACO Algorithm"):
+        with st.spinner('The ants are exploring the search space...'):
             start_time = time.time()
             
-            # Execute Algorithm
+            # Execute the function
             best_val, best_comb, history = aco_knapsack(
-                df[item_col].values, 
-                df[weight_col].values, 
-                df[val_col].values, 
-                capacity, n_ants, n_iterations, alpha, beta, evaporation
+                items=df[item_col].values, 
+                weights=df[weight_col].values, 
+                values=df[val_col].values, 
+                capacity=capacity, 
+                n_ants=n_ants, 
+                n_iterations=n_iterations,
+                evaporation=evaporation
             )
             
-            duration = time.time() - start_time
+            elapsed_time = time.time() - start_time
 
-        # --- 3. RESULTS & VISUALIZATION ---
-        st.divider()
-        res_col1, res_col2 = st.columns([1, 2])
+        # --- RESULTS DISPLAY ---
+        st.success("Optimization Finished!")
+        
+        # Metrics
+        m1, m2 = st.columns(2)
+        m1.metric("Maximum Value Found", f"{best_val}")
+        m2.metric("Execution Time", f"{elapsed_time:.4f} seconds")
 
-        with res_col1:
-            st.success("Optimization Complete!")
-            st.metric("Max Profit Found", f"{best_val}")
-            st.metric("Processing Time", f"{duration:.4f} seconds")
+        # Two columns for Table and Graph
+        col_left, col_right = st.columns([1, 1])
+
+        with col_left:
+            st.subheader("Selected Items Solution")
+            # Filter the dataframe to show only selected items
+            result_df = df[best_comb == 1]
+            st.dataframe(result_df)
             
-            # Display Selected Items
-            selected_items_df = df[best_comb == 1]
-            st.write(f"**Selected Items ({len(selected_items_df)}):**")
-            st.dataframe(selected_items_df[[item_col, val_col, weight_col]])
-            
-            # Download Button
-            csv_result = selected_items_df.to_csv(index=False).encode('utf-8')
+            # CSV Download Button
+            csv_data = result_df.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Download Result (CSV)",
-                data=csv_result,
-                file_name="aco_result.csv",
-                mime="text/csv"
+                label="📥 Download Result CSV",
+                data=csv_data,
+                file_name="aco_solution.csv",
+                mime="text/csv",
             )
 
-        with res_col2:
-            st.subheader("📈 Convergence Graph")
-            
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(history, color='#1E88E5', linewidth=2, label='Best Value')
-            ax.set_title("Performance over Iterations")
-            ax.set_xlabel("Iteration Number")
-            ax.set_ylabel("Best Value (Fitness)")
-            ax.legend()
-            ax.grid(True, linestyle='--', alpha=0.6)
-            
+        with col_right:
+            st.subheader("Convergence Graph")
+            # Plotting
+            fig, ax = plt.subplots()
+            ax.plot(history, color='blue', linewidth=2)
+            ax.set_title("Optimization Progress")
+            ax.set_xlabel("Iterations")
+            ax.set_ylabel("Best Value Found")
+            ax.grid(True, linestyle='--', alpha=0.5)
             st.pyplot(fig)
             
-            st.info("""
-            **How to interpret this graph:**
-            - **Steep Rise:** The ants are rapidly learning and discovering better combinations.
-            - **Plateau (Flat Line):** The algorithm has converged; the ants have likely found the optimal or near-optimal solution.
-            """)
+            st.info("This graph shows how the ants improved the solution over time.")
 
 else:
-    # Default State (No file uploaded)
-    st.info("👋 Please upload a CSV file to begin. Ensure your file has columns for Item Name, Value, and Weight.")
+    # Instructions when no file is uploaded
+    st.info("👋 Please upload a CSV file to start. The file must have columns for Item, Weight, and Value.")
     
-    st.markdown("**Example CSV Format:**")
-    example_df = pd.DataFrame({
-        'item': ['Laptop', 'Headphones', 'Coffee', 'Notebook'],
-        'value': [1500, 200, 10, 5],
-        'weight': [2000, 500, 200, 100]
-    })
-    st.code(example_df.to_csv(index=False), language='csv')
+    st.markdown("#### Example CSV Format:")
+    st.code("""item,value,weight
+Laptop,2000,2500
+Phone,1000,500
+Book,50,300""", language="csv")
