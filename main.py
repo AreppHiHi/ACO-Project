@@ -1,159 +1,108 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="ACO Knapsack Dashboard",
-    page_icon="🎒",
-    layout="wide"
-)
+# --- FUNGSI ALGORITMA ACO ---
+def aco_knapsack(items, weights, values, capacity, n_ants=10, n_iterations=50, alpha=1.0, beta=2.0, evaporation=0.5):
+    n_items = len(items)
+    pheromone = np.ones(n_items)  # Inisialisasi feromon
+    best_value = 0
+    best_combination = None
+    history = []
 
-# --- ACO for Knapsack Logic ---
-class ACO_Knapsack:
-    def __init__(self, values, weights, capacity, n_ants, iterations, alpha, beta, evaporation):
-        self.values = values
-        self.weights = weights
-        self.capacity = capacity
-        self.n_items = len(values)
-        self.n_ants = n_ants
-        self.iterations = iterations
-        self.alpha = alpha      # Pheromone importance
-        self.beta = beta        # Heuristic importance (Value/Weight ratio)
-        self.evaporation = evaporation
-        self.pheromone = np.ones(self.n_items)
-        
-        # Heuristic: Efficiency of each item (value per unit of weight)
-        self.heuristic = self.values / (self.weights + 1e-9) 
-
-    def run(self, progress_bar, chart_placeholder):
-        best_value = 0
-        best_selection = np.zeros(self.n_items)
-        history = []
-
-        for i in range(self.iterations):
-            all_solutions = []
-            all_values = []
-
-            for ant in range(self.n_ants):
-                selection = self._build_solution()
-                total_v = np.sum(selection * self.values)
-                total_w = np.sum(selection * self.weights)
+    for iteration in range(n_iterations):
+        all_ant_values = []
+        for ant in range(n_ants):
+            current_weight = 0
+            current_value = 0
+            selected_items = np.zeros(n_items)
+            
+            # Senarai barang yang belum dipilih
+            available_indices = list(range(n_items))
+            
+            while available_indices:
+                # Kira kebarangkalian (Pheromone ^ alpha * Heuristic ^ beta)
+                probs = []
+                for i in available_indices:
+                    if current_weight + weights[i] <= capacity:
+                        heuristic = values[i] / weights[i]
+                        prob = (pheromone[i] ** alpha) * (heuristic ** beta)
+                        probs.append(prob)
+                    else:
+                        probs.append(0)
                 
-                # Only consider valid solutions
-                if total_w <= self.capacity:
-                    all_solutions.append(selection)
-                    all_values.append(total_v)
-                    if total_v > best_value:
-                        best_value = total_v
-                        best_selection = selection.copy()
-
-            # Update Pheromones (Evaporation)
-            self.pheromone *= (1 - self.evaporation)
-            
-            # Update Pheromones (Deposit based on quality)
-            for sol, val in zip(all_solutions, all_values):
-                deposit = val / (best_value + 1e-9)
-                self.pheromone += (sol * deposit)
-
-            history.append(best_value)
-            
-            # UI Updates
-            progress_bar.progress((i + 1) / self.iterations)
-            chart_placeholder.line_chart(history)
-            time.sleep(0.01)
-            
-        return best_selection, best_value, history
-
-    def _build_solution(self):
-        solution = np.zeros(self.n_items)
-        current_weight = 0
-        indices = np.arange(self.n_items)
-        np.random.shuffle(indices) # Randomize entry order
-
-        for idx in indices:
-            if current_weight + self.weights[idx] <= self.capacity:
-                # Probability calculation
-                phi = self.pheromone[idx] ** self.alpha
-                eta = self.heuristic[idx] ** self.beta
+                if sum(probs) == 0: break
                 
-                # Decision rule (Simplified for 0/1 Knapsack)
-                prob = (phi * eta) / (phi * eta + 1.0)
-                if np.random.random() < prob:
-                    solution[idx] = 1
-                    current_weight += self.weights[idx]
-        return solution
+                probs = np.array(probs) / sum(probs)
+                next_item = np.random.choice(available_indices, p=probs)
+                
+                selected_items[next_item] = 1
+                current_weight += weights[next_item]
+                current_value += values[next_item]
+                available_indices.remove(next_item)
 
-# --- Streamlit UI Layout ---
-st.title("🐜 ACO Knapsack Problem Dashboard")
-st.markdown("""
-This dashboard uses **Ant Colony Optimization** to solve the 0/1 Knapsack Problem. 
-Upload a CSV, set the capacity, and watch the ants find the best combination of items.
-""")
+            # Kemas kini terbaik global
+            if current_value > best_value:
+                best_value = current_value
+                best_combination = selected_items.copy()
+            
+            all_ant_values.append(current_value)
 
-# Sidebar settings
-with st.sidebar:
-    st.header("⚙️ Algorithm Parameters")
-    capacity = st.number_input("Knapsack Capacity (Max Weight)", value=100, min_value=1)
-    ants = st.slider("Number of Ants", 5, 100, 20)
-    iters = st.slider("Iterations", 10, 500, 100)
+        # Update Pheromone (Evaporation + Deposition)
+        pheromone *= (1 - evaporation)
+        if best_combination is not None:
+            for i in range(n_items):
+                if best_combination[i] == 1:
+                    pheromone[i] += (best_value / capacity) # Deposit berdasarkan kualiti
+
+        history.append(max(all_ant_values))
     
-    st.subheader("Hyperparameters")
-    alpha = st.slider("Alpha (Pheromone)", 0.0, 5.0, 1.0)
-    beta = st.slider("Beta (Heuristic)", 0.0, 5.0, 2.0)
-    evap = st.slider("Evaporation Rate", 0.1, 0.9, 0.5)
+    return best_value, best_combination, history
 
-# Main Area
-st.subheader("1. Load Dataset")
-uploaded_file = st.file_uploader("Upload CSV (must contain 'value' and 'weight' columns)", type="csv")
+# --- ANTARA MUKA STREAMLIT ---
+st.set_page_config(page_title="ACO Knapsack Solver", layout="wide")
+st.title("🐜 Ant Colony Optimization: Knapsack Problem")
+
+st.sidebar.header("Konfigurasi Algoritma")
+capacity = st.sidebar.number_input("Kapasiti Beg (Weight)", min_value=1, value=50)
+n_ants = st.sidebar.slider("Bilangan Semut", 1, 50, 10)
+n_iterations = st.sidebar.slider("Bilangan Iterasi", 10, 200, 50)
+alpha = st.sidebar.slider("Pengaruh Feromon (Alpha)", 0.0, 5.0, 1.0)
+beta = st.sidebar.slider("Pengaruh Heuristik (Beta)", 0.0, 5.0, 2.0)
+
+uploaded_file = st.file_uploader("Muat naik Dataset CSV (item, value, weight)", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    
-    # CLEANING: Fixes the KeyError by cleaning column names
-    df.columns = df.columns.str.strip().str.lower()
-    
-    st.write("✅ Dataset Loaded. Columns found:", list(df.columns))
-    st.dataframe(df.head(), use_container_width=True)
+    st.subheader("Data Item")
+    st.write(df)
 
-    if 'value' in df.columns and 'weight' in df.columns:
-        if st.button("🚀 Start Optimization", type="primary"):
-            
-            # Execution
-            progress_bar = st.progress(0)
-            chart_placeholder = st.empty()
-            
-            aco = ACO_Knapsack(
-                values=df['value'].values,
-                weights=df['weight'].values,
-                capacity=capacity,
-                n_ants=ants,
-                iterations=iters,
-                alpha=alpha,
-                beta=beta,
-                evaporation=evap
+    if st.button("Jalankan Algoritma ACO"):
+        with st.spinner('Semut sedang mencari penyelesaian...'):
+            start_time = time.time()
+            best_val, best_comb, history = aco_knapsack(
+                df['item'].values, df['weight'].values, df['value'].values, 
+                capacity, n_ants, n_iterations, alpha, beta
             )
-            
-            best_sol, max_val, history = aco.run(progress_bar, chart_placeholder)
-            
-            # Display Results
-            st.success(f"Done! Maximum Value Found: {max_val}")
-            
-            res_col1, res_col2 = st.columns(2)
-            with res_col1:
-                st.write("### 📦 Selected Items")
-                df['selected'] = best_sol.astype(bool)
-                selected_df = df[df['selected'] == True]
-                st.dataframe(selected_df)
-            
-            with res_col2:
-                st.write("### 📊 Performance Summary")
-                total_weight = selected_df['weight'].sum()
-                st.metric("Total Value", f"{max_val}")
-                st.metric("Total Weight", f"{total_weight} / {capacity}")
-    else:
-        st.error("Error: CSV missing required columns. Ensure columns are named 'value' and 'weight'.")
-else:
-    st.info("👋 Please upload a CSV to begin. Example format: item_name, value, weight")
+            end_time = time.time()
+
+        # --- PAPARAN KEPUTUSAN ---
+        st.success(f"Selesai dalam {end_time - start_time:.2f} saat!")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Nilai Maksimum (Profit)", f"{best_val}")
+            selected_df = df[best_comb == 1]
+            st.write("**Barang yang dipilih:**")
+            st.table(selected_df)
+
+        with col2:
+            st.write("**Graf Penumpuan (Convergence Graph)**")
+            fig, ax = plt.subplots()
+            ax.plot(history, color='orange', linewidth=2)
+            ax.set_xlabel("Iterasi")
+            ax.set_ylabel("Nilai Terbaik")
+            ax.set_title("Peningkatan Nilai vs Masa")
+            st.pyplot(fig)
