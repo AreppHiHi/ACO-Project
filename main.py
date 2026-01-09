@@ -4,14 +4,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # =====================================================
-# ANT COLONY OPTIMIZATION (ACO) - OPTIMIZATION CORE
+# STREAMLIT CONFIG
+# =====================================================
+st.set_page_config(page_title="ACO Optimization Results", layout="wide")
+
+# =====================================================
+# ANT COLONY OPTIMIZATION (ACO)
 # =====================================================
 class AntColonyOptimizer:
-    """
-    Objective:
-    Minimize total traversal cost (TSP-style optimization)
-    """
-
     def __init__(self, distance_matrix, n_ants, n_iterations, alpha, beta, rho):
         self.D = distance_matrix
         self.n = distance_matrix.shape[0]
@@ -26,9 +26,6 @@ class AntColonyOptimizer:
         self.best_cost = float("inf")
         self.convergence = []
 
-    # -----------------------------
-    # Objective Function
-    # -----------------------------
     def objective(self, solution):
         cost = 0
         for i in range(len(solution) - 1):
@@ -36,9 +33,6 @@ class AntColonyOptimizer:
         cost += self.D[solution[-1]][solution[0]]
         return cost
 
-    # -----------------------------
-    # Transition Probability
-    # -----------------------------
     def transition_probability(self, current, visited):
         pheromone = np.copy(self.pheromone[current])
         pheromone[list(visited)] = 0
@@ -49,13 +43,9 @@ class AntColonyOptimizer:
         prob = (pheromone ** self.alpha) * (heuristic ** self.beta)
         return prob / prob.sum()
 
-    # -----------------------------
-    # Optimization Process
-    # -----------------------------
     def optimize(self):
         for _ in range(self.n_iterations):
-            solutions = []
-            costs = []
+            solutions, costs = [], []
 
             for _ in range(self.n_ants):
                 start = np.random.randint(self.n)
@@ -78,10 +68,10 @@ class AntColonyOptimizer:
 
             self.convergence.append(self.best_cost)
 
-            # Pheromone evaporation
+            # Evaporation
             self.pheromone *= (1 - self.rho)
 
-            # Pheromone reinforcement
+            # Reinforcement
             for sol, cost in zip(solutions, costs):
                 for i in range(len(sol) - 1):
                     self.pheromone[sol[i]][sol[i + 1]] += 1 / cost
@@ -90,28 +80,39 @@ class AntColonyOptimizer:
 
 
 # =====================================================
-# STREAMLIT DASHBOARD
+# HELPER: CACHE DISTANCE MATRIX
 # =====================================================
-st.set_page_config(page_title="ACO Optimization Results", layout="wide")
+@st.cache_data(show_spinner=False)
+def compute_distance_matrix(points):
+    n = len(points)
+    D = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            D[i][j] = np.linalg.norm(points[i] - points[j])
+    return D
 
-st.title("🐜 Ant Colony Optimization (ACO) – Full Optimization System")
+
+# =====================================================
+# UI
+# =====================================================
+st.title("🐜 Ant Colony Optimization (ACO) – Smooth Streamlit Dashboard")
 st.markdown("""
-This dashboard demonstrates **true optimization using Ant Colony Optimization (ACO)**.
-The goal is to **minimize the total traversal cost** of data points loaded from a CSV file.
+This application performs **true optimization** using **Ant Colony Optimization (ACO)**  
+to **minimize total traversal cost** of points loaded from a CSV file.
 """)
 
-# -----------------------------
+# =====================================================
 # CSV UPLOAD
-# -----------------------------
+# =====================================================
 uploaded_file = st.file_uploader("📂 Upload CSV file (numeric columns only)", type=["csv"])
 
 if uploaded_file is None:
-    st.info("⬆️ Upload a CSV file to begin optimization.")
+    st.info("⬆️ Please upload a CSV file to begin.")
     st.stop()
 
 df = pd.read_csv(uploaded_file)
 st.subheader("📄 Dataset Preview")
-st.dataframe(df)
+st.dataframe(df, use_container_width=True)
 
 numeric_df = df.select_dtypes(include=[np.number])
 
@@ -122,36 +123,38 @@ if numeric_df.shape[1] < 2:
 points = numeric_df.values
 n_nodes = len(points)
 
-# -----------------------------
-# PROBLEM FORMULATION
-# -----------------------------
-D = np.zeros((n_nodes, n_nodes))
-for i in range(n_nodes):
-    for j in range(n_nodes):
-        D[i][j] = np.linalg.norm(points[i] - points[j])
+# =====================================================
+# PROBLEM FORMULATION (CACHED)
+# =====================================================
+D = compute_distance_matrix(points)
 
-# -----------------------------
-# PARAMETER CONTROLS
-# -----------------------------
+# =====================================================
+# SIDEBAR PARAMETERS
+# =====================================================
 st.sidebar.header("ACO Parameters")
 
 n_ants = st.sidebar.slider("Number of Ants", 5, 50, 20)
 n_iterations = st.sidebar.slider("Iterations", 20, 300, 100)
-alpha = st.sidebar.slider("Alpha (pheromone influence)", 0.1, 5.0, 1.0)
-beta = st.sidebar.slider("Beta (heuristic influence)", 0.1, 5.0, 2.0)
+alpha = st.sidebar.slider("Alpha (pheromone)", 0.1, 5.0, 1.0)
+beta = st.sidebar.slider("Beta (heuristic)", 0.1, 5.0, 2.0)
 rho = st.sidebar.slider("Evaporation rate (ρ)", 0.01, 0.9, 0.5)
 
-# -----------------------------
+# =====================================================
 # RUN OPTIMIZATION
-# -----------------------------
+# =====================================================
 if st.button("🚀 Run ACO Optimization"):
-    optimizer = AntColonyOptimizer(D, n_ants, n_iterations, alpha, beta, rho)
-    best_solution, best_cost, convergence = optimizer.optimize()
+    np.random.seed(42)  # smooth & reproducible
+
+    with st.spinner("Running Ant Colony Optimization..."):
+        optimizer = AntColonyOptimizer(
+            D, n_ants, n_iterations, alpha, beta, rho
+        )
+        best_solution, best_cost, convergence = optimizer.optimize()
 
     col1, col2 = st.columns(2)
 
     # -----------------------------
-    # RESULT VISUAL 1: CONVERGENCE
+    # VISUAL 1: CONVERGENCE
     # -----------------------------
     with col1:
         st.subheader("📉 Optimization Convergence Curve")
@@ -160,10 +163,11 @@ if st.button("🚀 Run ACO Optimization"):
         ax1.set_xlabel("Iteration")
         ax1.set_ylabel("Best Objective Value")
         ax1.grid(True)
-        st.pyplot(fig1)
+        st.pyplot(fig1, clear_figure=True)
+        plt.close(fig1)
 
     # -----------------------------
-    # RESULT VISUAL 2: BEST SOLUTION
+    # VISUAL 2: OPTIMIZED PATH
     # -----------------------------
     with col2:
         st.subheader("🗺️ Optimized Solution Path")
@@ -172,14 +176,15 @@ if st.button("🚀 Run ACO Optimization"):
         ax2.plot(points[route, 0], points[route, 1], marker="o")
         ax2.set_title(f"Minimum Cost = {best_cost:.4f}")
         ax2.grid(True)
-        st.pyplot(fig2)
+        st.pyplot(fig2, clear_figure=True)
+        plt.close(fig2)
 
     # -----------------------------
-    # NUMERICAL RESULTS
+    # RESULTS SUMMARY
     # -----------------------------
     st.subheader("📊 Optimization Results Summary")
-    st.write(f"**Total Nodes:** {n_nodes}")
-    st.write(f"**Optimal Cost:** {best_cost:.4f}")
+    st.metric("Total Nodes", n_nodes)
+    st.metric("Optimal Cost", f"{best_cost:.4f}")
     st.write(f"**Alpha:** {alpha}, **Beta:** {beta}, **ρ:** {rho}")
 
-    st.success("Optimization completed successfully!")
+    st.success("Optimization completed successfully ✔")
