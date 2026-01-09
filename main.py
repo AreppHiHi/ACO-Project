@@ -3,11 +3,13 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Konfigurasi Halaman
+# =====================================================
+# STREAMLIT CONFIG
+# =====================================================
 st.set_page_config(page_title="ACO Optimization Results", layout="wide")
 
 # =====================================================
-# ANT COLONY OPTIMIZATION (ACO) - Optimized Logic
+# ANT COLONY OPTIMIZATION (ACO)
 # =====================================================
 class AntColonyOptimizer:
     def __init__(self, distance_matrix, n_ants, n_iterations, alpha, beta, rho):
@@ -25,44 +27,40 @@ class AntColonyOptimizer:
         self.convergence = []
 
     def objective(self, solution):
-        # Menggunakan indexing numpy untuk kelajuan pengiraan kos
-        idx1 = solution
-        idx2 = solution[1:] + [solution[0]]
-        return np.sum(self.D[idx1, idx2])
+        cost = 0
+        for i in range(len(solution) - 1):
+            cost += self.D[solution[i]][solution[i + 1]]
+        cost += self.D[solution[-1]][solution[0]]
+        return cost
+
+    def transition_probability(self, current, visited):
+        pheromone = np.copy(self.pheromone[current])
+        pheromone[list(visited)] = 0
+
+        heuristic = 1 / (self.D[current] + 1e-10)
+        heuristic[list(visited)] = 0
+
+        prob = (pheromone ** self.alpha) * (heuristic ** self.beta)
+        return prob / prob.sum()
 
     def optimize(self):
-        # Pre-calculate heuristic (1/distance) untuk kelajuan
-        eta = 1.0 / (self.D + np.eye(self.n) * 1e-10)
-        
         for _ in range(self.n_iterations):
-            all_solutions = []
-            all_costs = []
+            solutions, costs = [], []
 
             for _ in range(self.n_ants):
-                current = np.random.randint(self.n)
-                solution = [current]
-                visited = {current}
+                start = np.random.randint(self.n)
+                solution = [start]
+                visited = set(solution)
 
-                for _ in range(self.n - 1):
-                    # Kira kebarangkalian menggunakan operasi vektor
-                    phi = self.pheromone[current]
-                    h = eta[current]
-                    
-                    # Mask node yang sudah dilawati
-                    mask = np.ones(self.n, dtype=bool)
-                    mask[list(visited)] = False
-                    
-                    probs = (phi[mask] ** self.alpha) * (h[mask] ** self.beta)
-                    probs /= probs.sum()
-                    
-                    next_node = np.random.choice(np.where(mask)[0], p=probs)
+                while len(solution) < self.n:
+                    probs = self.transition_probability(solution[-1], visited)
+                    next_node = np.random.choice(self.n, p=probs)
                     solution.append(next_node)
                     visited.add(next_node)
-                    current = next_node
 
                 cost = self.objective(solution)
-                all_solutions.append(solution)
-                all_costs.append(cost)
+                solutions.append(solution)
+                costs.append(cost)
 
                 if cost < self.best_cost:
                     self.best_cost = cost
@@ -70,84 +68,123 @@ class AntColonyOptimizer:
 
             self.convergence.append(self.best_cost)
 
-            # Update pheromone (Vektorasi)
+            # Evaporation
             self.pheromone *= (1 - self.rho)
-            for sol, cost in zip(all_solutions, all_costs):
-                for i in range(self.n - 1):
-                    self.pheromone[sol[i], sol[i+1]] += 1.0 / cost
-                self.pheromone[sol[-1], sol[0]] += 1.0 / cost
+
+            # Reinforcement
+            for sol, cost in zip(solutions, costs):
+                for i in range(len(sol) - 1):
+                    self.pheromone[sol[i]][sol[i + 1]] += 1 / cost
 
         return self.best_solution, self.best_cost, self.convergence
 
-# =====================================================
-# PENGIRAAN JARAK (VEKTORASI)
-# =====================================================
-@st.cache_data
-def compute_distance_matrix(points):
-    # Pengiraan jarak Euclidean menggunakan broadcasting numpy (sangat laju)
-    diff = points[:, np.newaxis, :] - points[np.newaxis, :, :]
-    return np.sqrt(np.sum(diff**2, axis=-1))
 
 # =====================================================
-# UI TANPA EMOJI
+# HELPER: CACHE DISTANCE MATRIX
 # =====================================================
-st.title("Ant Colony Optimization (ACO) Dashboard")
+@st.cache_data(show_spinner=False)
+def compute_distance_matrix(points):
+    n = len(points)
+    D = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            D[i][j] = np.linalg.norm(points[i] - points[j])
+    return D
+
+
+# =====================================================
+# UI
+# =====================================================
+st.title("🐜 Ant Colony Optimization (ACO) – Smooth Streamlit Dashboard")
 st.markdown("""
-Aplikasi ini menjalankan optimasi Ant Colony Optimization (ACO) 
-untuk meminimumkan kos perjalanan bagi titik data yang dimuat naik.
+This application performs **true optimization** using **Ant Colony Optimization (ACO)**  
+to **minimize total traversal cost** of points loaded from a CSV file.
 """)
 
-uploaded_file = st.file_uploader("Muat naik fail CSV (lajur numerik sahaja)", type=["csv"])
+# =====================================================
+# CSV UPLOAD
+# =====================================================
+uploaded_file = st.file_uploader("📂 Upload CSV file (numeric columns only)", type=["csv"])
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    numeric_df = df.select_dtypes(include=[np.number])
+if uploaded_file is None:
+    st.info("⬆️ Please upload a CSV file to begin.")
+    st.stop()
 
-    if numeric_df.shape[1] < 2:
-        st.error("Fail CSV memerlukan sekurang-kurangnya dua lajur numerik.")
-        st.stop()
+df = pd.read_csv(uploaded_file)
+st.subheader("📄 Dataset Preview")
+st.dataframe(df, use_container_width=True)
 
-    points = numeric_df.values
-    D = compute_distance_matrix(points)
+numeric_df = df.select_dtypes(include=[np.number])
 
-    # Sidebar Parameters
-    st.sidebar.header("Parameter ACO")
-    n_ants = st.sidebar.slider("Bilangan Semut", 5, 50, 20)
-    n_iterations = st.sidebar.slider("Iterasi", 10, 200, 50)
-    alpha = st.sidebar.slider("Alpha (Pheromone)", 0.1, 5.0, 1.0)
-    beta = st.sidebar.slider("Beta (Heuristik)", 0.1, 5.0, 2.0)
-    rho = st.sidebar.slider("Kadar Penguapan (Rho)", 0.01, 0.9, 0.5)
+if numeric_df.shape[1] < 2:
+    st.error("CSV must contain at least TWO numeric columns.")
+    st.stop()
 
-    if st.button("Jalankan Optimasi"):
-        np.random.seed(42)
-        
-        with st.spinner("Sedang memproses..."):
-            optimizer = AntColonyOptimizer(D, n_ants, n_iterations, alpha, beta, rho)
-            best_solution, best_cost, convergence = optimizer.optimize()
+points = numeric_df.values
+n_nodes = len(points)
 
-        col1, col2 = st.columns(2)
+# =====================================================
+# PROBLEM FORMULATION (CACHED)
+# =====================================================
+D = compute_distance_matrix(points)
 
-        with col1:
-            st.subheader("Kurva Konvergens")
-            fig1, ax1 = plt.subplots()
-            ax1.plot(convergence, color='blue')
-            ax1.set_xlabel("Iterasi")
-            ax1.set_ylabel("Kos Objektif")
-            st.pyplot(fig1)
-            plt.close(fig1)
+# =====================================================
+# SIDEBAR PARAMETERS
+# =====================================================
+st.sidebar.header("ACO Parameters")
 
-        with col2:
-            st.subheader("Laluan Optimasi")
-            fig2, ax2 = plt.subplots()
-            route = best_solution + [best_solution[0]]
-            ax2.plot(points[route, 0], points[route, 1], marker="o", linestyle="-", color='red')
-            ax2.set_title(f"Kos Minimum: {best_cost:.4f}")
-            st.pyplot(fig2)
-            plt.close(fig2)
+n_ants = st.sidebar.slider("Number of Ants", 5, 50, 20)
+n_iterations = st.sidebar.slider("Iterations", 20, 300, 100)
+alpha = st.sidebar.slider("Alpha (pheromone)", 0.1, 5.0, 1.0)
+beta = st.sidebar.slider("Beta (heuristic)", 0.1, 5.0, 2.0)
+rho = st.sidebar.slider("Evaporation rate (ρ)", 0.01, 0.9, 0.5)
 
-        st.subheader("Ringkasan Keputusan")
-        st.write(f"Jumlah Titik: {len(points)}")
-        st.write(f"Kos Paling Optimum: {best_cost:.4f}")
-        st.success("Proses selesai.")
-else:
-    st.info("Sila muat naik fail CSV untuk memulakan.")
+# =====================================================
+# RUN OPTIMIZATION
+# =====================================================
+if st.button("🚀 Run ACO Optimization"):
+    np.random.seed(42)  # smooth & reproducible
+
+    with st.spinner("Running Ant Colony Optimization..."):
+        optimizer = AntColonyOptimizer(
+            D, n_ants, n_iterations, alpha, beta, rho
+        )
+        best_solution, best_cost, convergence = optimizer.optimize()
+
+    col1, col2 = st.columns(2)
+
+    # -----------------------------
+    # VISUAL 1: CONVERGENCE
+    # -----------------------------
+    with col1:
+        st.subheader("📉 Optimization Convergence Curve")
+        fig1, ax1 = plt.subplots()
+        ax1.plot(convergence)
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("Best Objective Value")
+        ax1.grid(True)
+        st.pyplot(fig1, clear_figure=True)
+        plt.close(fig1)
+
+    # -----------------------------
+    # VISUAL 2: OPTIMIZED PATH
+    # -----------------------------
+    with col2:
+        st.subheader("🗺️ Optimized Solution Path")
+        fig2, ax2 = plt.subplots()
+        route = best_solution + [best_solution[0]]
+        ax2.plot(points[route, 0], points[route, 1], marker="o")
+        ax2.set_title(f"Minimum Cost = {best_cost:.4f}")
+        ax2.grid(True)
+        st.pyplot(fig2, clear_figure=True)
+        plt.close(fig2)
+
+    # -----------------------------
+    # RESULTS SUMMARY
+    # -----------------------------
+    st.subheader("📊 Optimization Results Summary")
+    st.metric("Total Nodes", n_nodes)
+    st.metric("Optimal Cost", f"{best_cost:.4f}")
+    st.write(f"**Alpha:** {alpha}, **Beta:** {beta}, **ρ:** {rho}")
+
+    st.success("Optimization completed successfully ✔")
